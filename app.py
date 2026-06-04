@@ -48,13 +48,13 @@ def index():
 @app.route('/authorize')
 def authorize():
     """Google OAuth 인증 시작"""
-    # 환경 변수에서 credentials 읽기
     credentials_json = os.getenv('GOOGLE_CREDENTIALS')
     if credentials_json:
         client_config = json.loads(credentials_json)
     else:
-        # 로컬 개발 환경에서는 파일 사용
-        with open('credentials.json', 'r') as f:
+        # Render Secret Files 경로 또는 로컬 경로
+        credentials_path = '/etc/secrets/credentials.json' if os.path.exists('/etc/secrets/credentials.json') else 'credentials.json'
+        with open(credentials_path, 'r') as f:
             client_config = json.load(f)
 
     flow = Flow.from_client_config(
@@ -73,14 +73,13 @@ def authorize():
 def oauth2callback():
     """Google OAuth 콜백"""
     state = session['state']
-
-    # 환경 변수에서 credentials 읽기
     credentials_json = os.getenv('GOOGLE_CREDENTIALS')
     if credentials_json:
         client_config = json.loads(credentials_json)
     else:
-        # 로컬 개발 환경에서는 파일 사용
-        with open('credentials.json', 'r') as f:
+        # Render Secret Files 경로 또는 로컬 경로
+        credentials_path = '/etc/secrets/credentials.json' if os.path.exists('/etc/secrets/credentials.json') else 'credentials.json'
+        with open(credentials_path, 'r') as f:
             client_config = json.load(f)
 
     flow = Flow.from_client_config(
@@ -96,20 +95,65 @@ def oauth2callback():
 
 @app.route('/api/folders')
 def get_folders():
-    """구글 드라이브 폴더 목록 가져오기"""
+    """구글 드라이브 폴더 목록 가져오기 (서브폴더 포함)"""
     credentials = get_credentials()
     if not credentials:
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
         service = build('drive', 'v3', credentials=credentials)
-        results = service.files().list(
-            q="mimeType='application/vnd.google-apps.folder'",
-            pageSize=50,
-            fields="files(id, name)"
-        ).execute()
-        folders = results.get('files', [])
-        return jsonify(folders)
+
+        # 모든 폴더 가져오기 (페이지네이션 처리)
+        all_folders = []
+        page_token = None
+
+        while True:
+            results = service.files().list(
+                q="mimeType='application/vnd.google-apps.folder' and trashed=false",
+                pageSize=100,
+                fields="nextPageToken, files(id, name, parents)",
+                pageToken=page_token
+            ).execute()
+
+            folders = results.get('files', [])
+            all_folders.extend(folders)
+
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
+
+        # 폴더 ID를 키로 하는 맵 생성
+        folder_map = {f['id']: f for f in all_folders}
+
+        # 각 폴더의 전체 경로 계산
+        def get_folder_path(folder):
+            path = folder['name']
+            current = folder
+
+            # 최대 10단계까지만 (무한루프 방지)
+            for _ in range(10):
+                if 'parents' not in current or not current['parents']:
+                    break
+                parent_id = current['parents'][0]
+                if parent_id not in folder_map:
+                    break
+                current = folder_map[parent_id]
+                path = current['name'] + ' > ' + path
+
+            return path
+
+        # 폴더 목록에 경로 추가
+        folders_with_path = []
+        for folder in all_folders:
+            folders_with_path.append({
+                'id': folder['id'],
+                'name': get_folder_path(folder)
+            })
+
+        # 이름순 정렬
+        folders_with_path.sort(key=lambda x: x['name'])
+
+        return jsonify(folders_with_path)
     except HttpError as error:
         return jsonify({'error': str(error)}), 500
 
@@ -124,7 +168,7 @@ def get_students():
         service = build('sheets', 'v4', credentials=credentials)
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
-            range='A2:E'  # 헤더 제외
+            range='A2:E'
         ).execute()
         values = result.get('values', [])
 
@@ -159,26 +203,46 @@ def send_emails():
         return jsonify({'error': 'Folder ID is required'}), 400
 
     try:
-        # Drive, Sheets, Gmail 서비스 생성
         drive_service = build('drive', 'v3', credentials=credentials)
         sheets_service = build('sheets', 'v4', credentials=credentials)
         gmail_service = build('gmail', 'v1', credentials=credentials)
 
-        # 폴더 내 PDF 파일 목록 가져오기
-        results = drive_service.files().list(
-            q=f"'{folder_id}' in parents and mimeType='application/pdf'",
-            fields="files(id, name)"
-        ).execute()
-        files = results.get('files', [])
+        # 서브폴더를 재귀적으로 탐색하여 모든 PDF 파일 가져오기
+        def get_all_pdf_files(parent_folder_id, parent_folder_name=''):
+            """재귀적으로 폴더와 서브폴더의 모든 PDF 파일 가져오기"""
+            all_files = []
 
-        # 구글 시트에서 학생 정보 가져오기
+            # 현재 폴더의 하위 항목 가져오기
+            results = drive_service.files().list(
+                q=f"'{parent_folder_id}' in parents and trashed=false",
+                fields="files(id, name, mimeType)"
+            ).execute()
+            items = results.get('files', [])
+
+            for item in items:
+                if item['mimeType'] == 'application/pdf':
+                    # PDF 파일이면 추가 (exam_type은 서브폴더 이름)
+                    all_files.append({
+                        'id': item['id'],
+                        'name': item['name'],
+                        'exam_type': parent_folder_name if parent_folder_name else folder_name
+                    })
+                elif item['mimeType'] == 'application/vnd.google-apps.folder':
+                    # 폴더이면 재귀 호출 (서브폴더 이름을 exam_type으로 사용)
+                    subfolder_files = get_all_pdf_files(item['id'], item['name'])
+                    all_files.extend(subfolder_files)
+
+            return all_files
+
+        # 선택한 폴더에서 모든 PDF 파일 가져오기
+        files = get_all_pdf_files(folder_id)
+
         sheet_result = sheets_service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
             range='A2:E'
         ).execute()
         students = sheet_result.get('values', [])
 
-        # 학생명-이메일 매핑
         student_map = {}
         for i, row in enumerate(students, start=2):
             if len(row) > 3:
@@ -186,36 +250,32 @@ def send_emails():
                 email = row[3]
                 student_map[name] = {'email': email, 'row': i}
 
-        results = []
+        results_list = []
         updates = []
 
         for file in files:
-            # 파일명에서 이름 추출 (확장자 제거)
             name = file['name'].replace('.pdf', '')
+            exam_type = file['exam_type']
 
             if name not in student_map:
-                results.append({'name': name, 'status': 'error', 'message': '이메일을 찾을 수 없습니다'})
+                results_list.append({'name': name, 'status': 'error', 'message': '이메일을 찾을 수 없습니다'})
                 continue
 
             student = student_map[name]
             email = student['email']
             row = student['row']
-
-            # PDF 공유 링크 생성
             file_id = file['id']
 
-            # 파일을 누구나 볼 수 있도록 권한 설정
             try:
                 drive_service.permissions().create(
                     fileId=file_id,
                     body={'type': 'anyone', 'role': 'reader'}
                 ).execute()
             except:
-                pass  # 이미 공유되어 있을 수 있음
+                pass
 
             pdf_link = f"https://drive.google.com/file/d/{file_id}/view"
 
-            # 이메일 발송
             try:
                 from email.mime.text import MIMEText
                 import base64
@@ -223,14 +283,14 @@ def send_emails():
                 message = MIMEText(f"""
 안녕하세요 {name}님,
 
-{folder_name} 성적표를 전달드립니다.
+{exam_type} 성적표를 전달드립니다.
 
 성적표 확인: {pdf_link}
 
 감사합니다.
 """)
                 message['to'] = email
-                message['subject'] = f'[{folder_name}] 성적표 발송'
+                message['subject'] = f'[{exam_type}] 성적표 발송'
 
                 raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
                 gmail_service.users().messages().send(
@@ -238,29 +298,27 @@ def send_emails():
                     body={'raw': raw_message}
                 ).execute()
 
-                # 시트 업데이트 준비
                 updates.append({
                     'range': f'B{row}:E{row}',
-                    'values': [[folder_name, pdf_link, email, '발송 완료']]
+                    'values': [[exam_type, pdf_link, email, '발송 완료']]
                 })
 
-                results.append({'name': name, 'status': 'success', 'email': email})
+                results_list.append({'name': name, 'status': 'success', 'email': email})
 
             except Exception as e:
-                results.append({'name': name, 'status': 'error', 'message': str(e)})
+                results_list.append({'name': name, 'status': 'error', 'message': str(e)})
 
-        # 시트 일괄 업데이트
         if updates:
             sheets_service.spreadsheets().values().batchUpdate(
                 spreadsheetId=GOOGLE_SHEET_ID,
                 body={'data': updates, 'valueInputOption': 'RAW'}
             ).execute()
 
-        return jsonify({'results': results})
+        return jsonify({'results': results_list})
 
     except HttpError as error:
         return jsonify({'error': str(error)}), 500
 
 if __name__ == '__main__':
-    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # 개발 환경에서만 사용
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     app.run(debug=True, port=5000)
