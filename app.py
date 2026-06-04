@@ -48,8 +48,17 @@ def index():
 @app.route('/authorize')
 def authorize():
     """Google OAuth 인증 시작"""
-    flow = Flow.from_client_secrets_file(
-        'credentials.json',
+    # 환경 변수에서 credentials 읽기
+    credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+    if credentials_json:
+        client_config = json.loads(credentials_json)
+    else:
+        # 로컬 개발 환경에서는 파일 사용
+        with open('credentials.json', 'r') as f:
+            client_config = json.load(f)
+
+    flow = Flow.from_client_config(
+        client_config,
         scopes=SCOPES,
         redirect_uri=url_for('oauth2callback', _external=True)
     )
@@ -64,8 +73,18 @@ def authorize():
 def oauth2callback():
     """Google OAuth 콜백"""
     state = session['state']
-    flow = Flow.from_client_secrets_file(
-        'credentials.json',
+
+    # 환경 변수에서 credentials 읽기
+    credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+    if credentials_json:
+        client_config = json.loads(credentials_json)
+    else:
+        # 로컬 개발 환경에서는 파일 사용
+        with open('credentials.json', 'r') as f:
+            client_config = json.load(f)
+
+    flow = Flow.from_client_config(
+        client_config,
         scopes=SCOPES,
         state=state,
         redirect_uri=url_for('oauth2callback', _external=True)
