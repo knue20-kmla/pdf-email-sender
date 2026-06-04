@@ -148,6 +148,65 @@
             color: #999;
         }
 
+        .folder-dropdown {
+            position: relative;
+        }
+
+        .folder-dropdown-trigger {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 15px;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s;
+        }
+
+        .folder-dropdown-trigger:hover {
+            border-color: #2a5298;
+        }
+
+        .folder-dropdown-trigger.open {
+            border-color: #2a5298;
+            box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.1);
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+
+        .dropdown-arrow {
+            transition: transform 0.3s;
+            color: #666;
+        }
+
+        .dropdown-arrow.open {
+            transform: rotate(180deg);
+        }
+
+        .folder-dropdown-content {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 2px solid #2a5298;
+            border-top: none;
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none;
+            max-height: 400px;
+            overflow: hidden;
+        }
+
+        .folder-dropdown-content.open {
+            display: block;
+        }
+
         .select-button {
             margin-top: 10px;
             padding: 10px 20px;
@@ -322,18 +381,21 @@
 
         <form id="sendForm">
             <div class="form-group">
-                <label for="folderBrowser" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;" onclick="toggleFolderList()">
-                    <span>📁 발송 자료 선택</span>
-                    <span id="toggleIcon" style="transition: transform 0.3s;">▼</span>
-                </label>
-                <div id="folderBrowserContainer" style="display: none;">
-                    <div class="breadcrumb" id="breadcrumb">
-                        <span class="breadcrumb-item current" data-id="root">내 드라이브</span>
+                <label for="folderBrowser">📁 발송 자료 선택</label>
+                <div class="folder-dropdown">
+                    <div class="folder-dropdown-trigger" id="folderDropdownTrigger" onclick="toggleFolderDropdown()">
+                        <span id="selectedFolderText">폴더를 선택하세요...</span>
+                        <span class="dropdown-arrow" id="dropdownArrow">▼</span>
                     </div>
-                    <div class="folder-list" id="folderList">
-                        <div class="empty-folder">폴더를 불러오는 중...</div>
+                    <div class="folder-dropdown-content" id="folderDropdownContent">
+                        <div class="breadcrumb" id="breadcrumb">
+                            <span class="breadcrumb-item current" data-id="root">내 드라이브</span>
+                        </div>
+                        <div class="folder-list" id="folderList">
+                            <div class="empty-folder">폴더를 불러오는 중...</div>
+                        </div>
+                        <button type="button" class="select-button" id="selectFolderBtn" disabled>이 폴더 선택</button>
                     </div>
-                    <button type="button" class="select-button" id="selectFolderBtn" disabled>이 폴더 선택</button>
                 </div>
             </div>
 
@@ -366,25 +428,42 @@
         let breadcrumbPath = [{id: 'root', name: '내 드라이브'}];
         let folderListLoaded = false;
 
-        // 폴더 리스트 토글
-        function toggleFolderList() {
-            const container = document.getElementById('folderBrowserContainer');
-            const icon = document.getElementById('toggleIcon');
+        // 드롭다운 토글
+        function toggleFolderDropdown() {
+            const content = document.getElementById('folderDropdownContent');
+            const trigger = document.getElementById('folderDropdownTrigger');
+            const arrow = document.getElementById('dropdownArrow');
 
-            if (container.style.display === 'none') {
-                container.style.display = 'block';
-                icon.style.transform = 'rotate(180deg)';
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                trigger.classList.remove('open');
+                arrow.classList.remove('open');
+            } else {
+                content.classList.add('open');
+                trigger.classList.add('open');
+                arrow.classList.add('open');
 
                 // 처음 열 때만 폴더 로드
                 if (!folderListLoaded) {
                     loadFolders('root');
                     folderListLoaded = true;
                 }
-            } else {
-                container.style.display = 'none';
-                icon.style.transform = 'rotate(0deg)';
             }
         }
+
+        // 드롭다운 외부 클릭 시 닫기
+        document.addEventListener('click', function(event) {
+            const dropdown = document.querySelector('.folder-dropdown');
+            if (dropdown && !dropdown.contains(event.target)) {
+                const content = document.getElementById('folderDropdownContent');
+                const trigger = document.getElementById('folderDropdownTrigger');
+                const arrow = document.getElementById('dropdownArrow');
+
+                content.classList.remove('open');
+                trigger.classList.remove('open');
+                arrow.classList.remove('open');
+            }
+        });
 
         // 페이지 로드 시에는 자동으로 폴더를 불러오지 않음
         window.addEventListener('DOMContentLoaded', async () => {
@@ -481,7 +560,17 @@
         // 폴더 선택 버튼
         document.getElementById('selectFolderBtn').addEventListener('click', () => {
             if (selectedFolderId) {
-                alert(`선택된 폴더: ${selectedFolderName}`);
+                // 드롭다운 트리거 텍스트 업데이트
+                document.getElementById('selectedFolderText').textContent = selectedFolderName;
+
+                // 드롭다운 닫기
+                const content = document.getElementById('folderDropdownContent');
+                const trigger = document.getElementById('folderDropdownTrigger');
+                const arrow = document.getElementById('dropdownArrow');
+
+                content.classList.remove('open');
+                trigger.classList.remove('open');
+                arrow.classList.remove('open');
             }
         });
 
