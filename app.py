@@ -1,13 +1,13 @@
 import os
-  from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-  from google.oauth2.credentials import Credentials
-  from google_auth_oauthlib.flow import Flow
-  from googleapiclient.discovery import build
-  from googleapiclient.errors import HttpError
-  from dotenv import load_dotenv
-  import json
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from dotenv import load_dotenv
+import json
 
-  load_dotenv()
+load_dotenv()
 
   app = Flask(__name__)
   app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key')
