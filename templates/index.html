@@ -72,6 +72,108 @@
             font-size: 14px;
         }
 
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            color: #666;
+            flex-wrap: wrap;
+        }
+
+        .breadcrumb-item {
+            cursor: pointer;
+            color: #2a5298;
+            transition: color 0.2s;
+        }
+
+        .breadcrumb-item:hover {
+            color: #1e3c72;
+            text-decoration: underline;
+        }
+
+        .breadcrumb-item.current {
+            color: #333;
+            font-weight: 600;
+            cursor: default;
+        }
+
+        .breadcrumb-item.current:hover {
+            text-decoration: none;
+        }
+
+        .breadcrumb-separator {
+            color: #ccc;
+        }
+
+        .folder-list {
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #fafafa;
+        }
+
+        .folder-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .folder-item:last-child {
+            border-bottom: none;
+        }
+
+        .folder-item:hover {
+            background: #f0f4f8;
+        }
+
+        .folder-item.selected {
+            background: #e3f2fd;
+            font-weight: 600;
+        }
+
+        .folder-icon {
+            font-size: 18px;
+        }
+
+        .empty-folder {
+            padding: 40px 20px;
+            text-align: center;
+            color: #999;
+        }
+
+        .select-button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #2a5298;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            width: auto;
+            display: inline-block;
+        }
+
+        .select-button:hover {
+            background: #1e3c72;
+            transform: translateY(-1px);
+        }
+
+        .select-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         select, input[type="text"] {
             width: 100%;
             padding: 12px 15px;
@@ -220,10 +322,14 @@
 
         <form id="sendForm">
             <div class="form-group">
-                <label for="folderSelect">📁 구글 드라이브 폴더 선택</label>
-                <select id="folderSelect" name="folder">
-                    <option value="">폴더를 선택하세요...</option>
-                </select>
+                <label for="folderBrowser">📁 발송 자료 선택</label>
+                <div class="breadcrumb" id="breadcrumb">
+                    <span class="breadcrumb-item current" data-id="root">내 드라이브</span>
+                </div>
+                <div class="folder-list" id="folderList">
+                    <div class="empty-folder">폴더를 불러오는 중...</div>
+                </div>
+                <button type="button" class="select-button" id="selectFolderBtn" disabled>이 폴더 선택</button>
             </div>
 
             <div class="or-divider">또는</div>
@@ -248,21 +354,108 @@
     </div>
 
     <script>
-        // 페이지 로드 시 폴더 목록 가져오기
+        let currentFolderId = 'root';
+        let currentFolderName = '내 드라이브';
+        let selectedFolderId = null;
+        let selectedFolderName = null;
+        let breadcrumbPath = [{id: 'root', name: '내 드라이브'}];
+
+        // 페이지 로드 시 루트 폴더 목록 가져오기
         window.addEventListener('DOMContentLoaded', async () => {
+            await loadFolders('root');
+        });
+
+        // 폴더 목록 로드
+        async function loadFolders(parentId) {
+            const folderList = document.getElementById('folderList');
+            folderList.innerHTML = '<div class="empty-folder">폴더를 불러오는 중...</div>';
+
             try {
-                const response = await fetch('/api/folders');
+                const response = await fetch(`/api/folders?parent_id=${parentId}`);
                 const folders = await response.json();
 
-                const select = document.getElementById('folderSelect');
+                if (folders.error) {
+                    folderList.innerHTML = '<div class="empty-folder">폴더를 불러올 수 없습니다</div>';
+                    return;
+                }
+
+                if (folders.length === 0) {
+                    folderList.innerHTML = '<div class="empty-folder">하위 폴더가 없습니다</div>';
+                    return;
+                }
+
+                folderList.innerHTML = '';
                 folders.forEach(folder => {
-                    const option = document.createElement('option');
-                    option.value = folder.id;
-                    option.textContent = folder.name;
-                    select.appendChild(option);
+                    const div = document.createElement('div');
+                    div.className = 'folder-item';
+                    div.innerHTML = `<span class="folder-icon">📁</span><span>${folder.name}</span>`;
+                    div.onclick = () => navigateToFolder(folder.id, folder.name);
+                    folderList.appendChild(div);
                 });
             } catch (error) {
                 console.error('폴더 목록 로드 실패:', error);
+                folderList.innerHTML = '<div class="empty-folder">폴더를 불러올 수 없습니다</div>';
+            }
+        }
+
+        // 폴더로 이동
+        function navigateToFolder(folderId, folderName) {
+            currentFolderId = folderId;
+            currentFolderName = folderName;
+
+            // breadcrumb 업데이트
+            breadcrumbPath.push({id: folderId, name: folderName});
+            updateBreadcrumb();
+
+            // 새 폴더 로드
+            loadFolders(folderId);
+
+            // 선택 버튼 활성화
+            selectedFolderId = folderId;
+            selectedFolderName = folderName;
+            document.getElementById('selectFolderBtn').disabled = false;
+        }
+
+        // breadcrumb 업데이트
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = '';
+
+            breadcrumbPath.forEach((item, index) => {
+                const span = document.createElement('span');
+                span.className = index === breadcrumbPath.length - 1 ? 'breadcrumb-item current' : 'breadcrumb-item';
+                span.textContent = item.name;
+                span.dataset.id = item.id;
+
+                if (index < breadcrumbPath.length - 1) {
+                    span.onclick = () => navigateBack(index);
+                }
+
+                breadcrumb.appendChild(span);
+
+                if (index < breadcrumbPath.length - 1) {
+                    const separator = document.createElement('span');
+                    separator.className = 'breadcrumb-separator';
+                    separator.textContent = '›';
+                    breadcrumb.appendChild(separator);
+                }
+            });
+        }
+
+        // breadcrumb에서 뒤로 가기
+        function navigateBack(index) {
+            breadcrumbPath = breadcrumbPath.slice(0, index + 1);
+            const target = breadcrumbPath[index];
+            currentFolderId = target.id;
+            currentFolderName = target.name;
+            updateBreadcrumb();
+            loadFolders(target.id);
+        }
+
+        // 폴더 선택 버튼
+        document.getElementById('selectFolderBtn').addEventListener('click', () => {
+            if (selectedFolderId) {
+                alert(`선택된 폴더: ${selectedFolderName}`);
             }
         });
 
@@ -270,19 +463,14 @@
         document.getElementById('sendForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const folderSelect = document.getElementById('folderSelect').value;
             const folderIdInput = document.getElementById('folderId').value;
-            const folderId = folderIdInput || folderSelect;
+            const folderId = folderIdInput || selectedFolderId;
+            const folderName = folderIdInput ? folderIdInput : selectedFolderName;
 
             if (!folderId) {
                 alert('폴더를 선택하거나 폴더 ID를 입력해주세요.');
                 return;
             }
-
-            // 폴더 이름 가져오기
-            const folderName = folderIdInput ?
-                folderIdInput :
-                document.getElementById('folderSelect').options[document.getElementById('folderSelect').selectedIndex].text;
 
             // UI 업데이트
             document.getElementById('sendBtn').disabled = true;
