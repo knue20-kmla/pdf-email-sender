@@ -322,14 +322,19 @@
 
         <form id="sendForm">
             <div class="form-group">
-                <label for="folderBrowser">📁 발송 자료 선택</label>
-                <div class="breadcrumb" id="breadcrumb">
-                    <span class="breadcrumb-item current" data-id="root">내 드라이브</span>
+                <label for="folderBrowser" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;" onclick="toggleFolderList()">
+                    <span>📁 발송 자료 선택</span>
+                    <span id="toggleIcon" style="transition: transform 0.3s;">▼</span>
+                </label>
+                <div id="folderBrowserContainer" style="display: none;">
+                    <div class="breadcrumb" id="breadcrumb">
+                        <span class="breadcrumb-item current" data-id="root">내 드라이브</span>
+                    </div>
+                    <div class="folder-list" id="folderList">
+                        <div class="empty-folder">폴더를 불러오는 중...</div>
+                    </div>
+                    <button type="button" class="select-button" id="selectFolderBtn" disabled>이 폴더 선택</button>
                 </div>
-                <div class="folder-list" id="folderList">
-                    <div class="empty-folder">폴더를 불러오는 중...</div>
-                </div>
-                <button type="button" class="select-button" id="selectFolderBtn" disabled>이 폴더 선택</button>
             </div>
 
             <div class="or-divider">또는</div>
@@ -359,10 +364,31 @@
         let selectedFolderId = null;
         let selectedFolderName = null;
         let breadcrumbPath = [{id: 'root', name: '내 드라이브'}];
+        let folderListLoaded = false;
 
-        // 페이지 로드 시 루트 폴더 목록 가져오기
+        // 폴더 리스트 토글
+        function toggleFolderList() {
+            const container = document.getElementById('folderBrowserContainer');
+            const icon = document.getElementById('toggleIcon');
+
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                icon.style.transform = 'rotate(180deg)';
+
+                // 처음 열 때만 폴더 로드
+                if (!folderListLoaded) {
+                    loadFolders('root');
+                    folderListLoaded = true;
+                }
+            } else {
+                container.style.display = 'none';
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // 페이지 로드 시에는 자동으로 폴더를 불러오지 않음
         window.addEventListener('DOMContentLoaded', async () => {
-            await loadFolders('root');
+            // 폴더 목록은 사용자가 클릭할 때만 로드
         });
 
         // 폴더 목록 로드
