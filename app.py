@@ -95,32 +95,65 @@ def oauth2callback():
 
 @app.route('/api/folders')
 def get_folders():
-    """특정 폴더의 하위 폴더 목록 가져오기"""
+    """구글 드라이브 폴더 목록 가져오기 (서브폴더 포함)"""
     credentials = get_credentials()
     if not credentials:
         return jsonify({'error': 'Not authenticated'}), 401
 
-    parent_id = request.args.get('parent_id', 'root')
-
     try:
         service = build('drive', 'v3', credentials=credentials)
 
-        # 특정 부모 폴더의 하위 폴더만 가져오기
-        if parent_id == 'root':
-            query = "mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"
-        else:
-            query = f"mimeType='application/vnd.google-apps.folder' and '{parent_id}' in parents and trashed=false"
+        # 모든 폴더 가져오기 (페이지네이션 처리)
+        all_folders = []
+        page_token = None
 
-        results = service.files().list(
-            q=query,
-            pageSize=100,
-            fields="files(id, name)",
-            orderBy='name'
-        ).execute()
+        while True:
+            results = service.files().list(
+                q="mimeType='application/vnd.google-apps.folder' and trashed=false",
+                pageSize=100,
+                fields="nextPageToken, files(id, name, parents)",
+                pageToken=page_token
+            ).execute()
 
-        folders = results.get('files', [])
+            folders = results.get('files', [])
+            all_folders.extend(folders)
 
-        return jsonify(folders)
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
+
+        # 폴더 ID를 키로 하는 맵 생성
+        folder_map = {f['id']: f for f in all_folders}
+
+        # 각 폴더의 전체 경로 계산
+        def get_folder_path(folder):
+            path = folder['name']
+            current = folder
+
+            # 최대 10단계까지만 (무한루프 방지)
+            for _ in range(10):
+                if 'parents' not in current or not current['parents']:
+                    break
+                parent_id = current['parents'][0]
+                if parent_id not in folder_map:
+                    break
+                current = folder_map[parent_id]
+                path = current['name'] + ' > ' + path
+
+            return path
+
+        # 폴더 목록에 경로 추가
+        folders_with_path = []
+        for folder in all_folders:
+            folders_with_path.append({
+                'id': folder['id'],
+                'name': get_folder_path(folder)
+            })
+
+        # 이름순 정렬
+        folders_with_path.sort(key=lambda x: x['name'])
+
+        return jsonify(folders_with_path)
     except HttpError as error:
         return jsonify({'error': str(error)}), 500
 
